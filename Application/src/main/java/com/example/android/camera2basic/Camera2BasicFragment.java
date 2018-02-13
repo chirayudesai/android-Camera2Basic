@@ -59,6 +59,14 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Toast;
 
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.LuminanceSource;
+import com.google.zxing.PlanarYUVLuminanceSource;
+import com.google.zxing.Reader;
+import com.google.zxing.Result;
+import com.google.zxing.common.HybridBinarizer;
+import com.google.zxing.qrcode.QRCodeReader;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -243,10 +251,43 @@ public class Camera2BasicFragment extends Fragment
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
+            mBackgroundHandler.post(new ImageDecoder(reader.acquireNextImage()));
         }
 
     };
+
+    private static class ImageDecoder implements Runnable {
+
+        /**
+         * The YUV image
+         */
+        private final Image mImage;
+
+        ImageDecoder(Image image) {
+            mImage = image;
+        }
+
+        @Override
+        public void run() {
+            ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            Reader qrreader = new QRCodeReader();
+            try {
+                LuminanceSource ls = new PlanarYUVLuminanceSource(
+                        bytes, mImage.getWidth(), mImage.getHeight(),
+                        0, 0, mImage.getWidth(), mImage.getHeight(), false);
+                Result r = qrreader.decode(new BinaryBitmap(new HybridBinarizer(ls)));
+                Log.d(TAG, "cdesai: QR Code decoded: " + r.getText());
+            } catch (Exception e) {
+                Log.d(TAG, "cdesai: no QR?");
+                e.printStackTrace();
+            } finally {
+                mImage.close();
+            }
+        }
+
+    }
 
     /**
      * {@link CaptureRequest.Builder} for the camera preview
@@ -510,10 +551,10 @@ public class Camera2BasicFragment extends Fragment
 
                 // For still image captures, we use the largest available size.
                 Size largest = Collections.max(
-                        Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
+                        Arrays.asList(map.getOutputSizes(ImageFormat.YUV_420_888)),
                         new CompareSizesByArea());
-                mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
-                        ImageFormat.JPEG, /*maxImages*/2);
+                mImageReader = ImageReader.newInstance(MAX_PREVIEW_WIDTH, MAX_PREVIEW_HEIGHT,
+                        ImageFormat.YUV_420_888, /*maxImages*/2);
                 mImageReader.setOnImageAvailableListener(
                         mOnImageAvailableListener, mBackgroundHandler);
 
@@ -687,6 +728,7 @@ public class Camera2BasicFragment extends Fragment
             mPreviewRequestBuilder
                     = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             mPreviewRequestBuilder.addTarget(surface);
+            mPreviewRequestBuilder.addTarget(mImageReader.getSurface());
 
             // Here, we create a CameraCaptureSession for camera preview.
             mCameraDevice.createCaptureSession(Arrays.asList(surface, mImageReader.getSurface()),
