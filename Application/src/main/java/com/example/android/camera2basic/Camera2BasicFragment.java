@@ -27,6 +27,7 @@ import android.content.res.Configuration;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
 import android.graphics.Point;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -136,6 +137,9 @@ public class Camera2BasicFragment extends Fragment
      */
     private static final int MAX_PREVIEW_HEIGHT = 1080;
 
+    private Rect mFramingRect;
+    private Rect mFramingRectInPreview;
+
     /**
      * {@link TextureView.SurfaceTextureListener} handles several lifecycle events on a
      * {@link TextureView}.
@@ -173,6 +177,8 @@ public class Camera2BasicFragment extends Fragment
      * An {@link AutoFitTextureView} for camera preview.
      */
     private AutoFitTextureView mTextureView;
+
+    private ScanWindowView mScanWindowView;
 
     /**
      * A {@link CameraCaptureSession } for camera preview.
@@ -251,7 +257,7 @@ public class Camera2BasicFragment extends Fragment
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            mBackgroundHandler.post(new ImageDecoder(reader.acquireNextImage()));
+            mBackgroundHandler.post(new ImageDecoder(getActivity(), reader.acquireNextImage(), Utils.getFramingRectInPreview()));
         }
 
     };
@@ -263,8 +269,14 @@ public class Camera2BasicFragment extends Fragment
          */
         private final Image mImage;
 
-        ImageDecoder(Image image) {
+        private Rect mRect;
+
+        private Context mContext;
+
+        ImageDecoder(Context context, Image image, Rect rect) {
+            mContext = context;
             mImage = image;
+            mRect = rect;
         }
 
         @Override
@@ -274,14 +286,15 @@ public class Camera2BasicFragment extends Fragment
             buffer.get(bytes);
             Reader qrreader = new QRCodeReader();
             try {
+                Log.d(TAG, "cdesai: left " + mRect.left + " top " + mRect.top + " h " + (mRect.right - mRect.left) + " w " + (mRect.bottom - mRect.top));
                 LuminanceSource ls = new PlanarYUVLuminanceSource(
                         bytes, mImage.getWidth(), mImage.getHeight(),
-                        0, 0, mImage.getWidth(), mImage.getHeight(), false);
+                        mRect.left, mRect.top, mRect.right - mRect.left, mRect.bottom - mRect.top, false);
                 Result r = qrreader.decode(new BinaryBitmap(new HybridBinarizer(ls)));
                 Log.d(TAG, "cdesai: QR Code decoded: " + r.getText());
+                Toast.makeText(mContext, "QR code decoded", Toast.LENGTH_SHORT).show();
             } catch (Exception e) {
-                Log.d(TAG, "cdesai: no QR?");
-                e.printStackTrace();
+                // TODO Only catch the expected exceptions
             } finally {
                 mImage.close();
             }
@@ -467,9 +480,8 @@ public class Camera2BasicFragment extends Fragment
 
     @Override
     public void onViewCreated(final View view, Bundle savedInstanceState) {
-        view.findViewById(R.id.picture).setOnClickListener(this);
-        view.findViewById(R.id.info).setOnClickListener(this);
         mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
+        mScanWindowView = (ScanWindowView) view.findViewById(R.id.window);
     }
 
     @Override
@@ -928,22 +940,7 @@ public class Camera2BasicFragment extends Fragment
 
     @Override
     public void onClick(View view) {
-        switch (view.getId()) {
-            case R.id.picture: {
-                takePicture();
-                break;
-            }
-            case R.id.info: {
-                Activity activity = getActivity();
-                if (null != activity) {
-                    new AlertDialog.Builder(activity)
-                            .setMessage(R.string.intro_message)
-                            .setPositiveButton(android.R.string.ok, null)
-                            .show();
-                }
-                break;
-            }
-        }
+        // Do nothing
     }
 
     private void setAutoFlash(CaptureRequest.Builder requestBuilder) {
